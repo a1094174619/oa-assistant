@@ -21,7 +21,7 @@ OA Assistant 通过分析 Chrome 浏览器导出的 HAR（HTTP Archive）文件�
 
 ```bash
 # 克隆仓库
-git clone https://github.com/YOUR_USERNAME/oa-assistant.git
+git clone https://github.com/a1094174619/oa-assistant.git
 cd oa-assistant
 
 # 安装依赖
