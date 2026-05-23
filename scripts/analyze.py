@@ -393,7 +393,7 @@ def analyze_har(har_path, site_id=None, site_name=None, base_url=None,
 
 def _update_index(index_path, site_id, site_name, base_url, aliases,
                   params_data, site_dir):
-    """更新知识库索引"""
+    """更新已学系统索引"""
     # 读取现有索引
     if os.path.exists(index_path):
         with open(index_path, 'r', encoding='utf-8') as f:

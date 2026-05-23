@@ -15,7 +15,7 @@
 - **一个 HAR 文件走天下**：导出一次，自动识别所有 API 操作（发邮件、审批、查询、发文、上传……）
 - **零手动编码**：自动生成 `interface.py`，HTTP 封装、Cookie 管理、加密钩子全给你写好
 - **三级自检**：生成的代码先自我测试（语法→请求构造→真实发送），挂了还能自诊断
-- **一次学习永久复用**：学过的系统存进知识库，下次直接调用
+- **一次学习永久复用**：学过的系统存在 oa_sites 目录下，下次直接调用
 - **AI 友好**：就是为 Agent 设计的，让你的 AI 能直接操作企业内部系统
 
 ## 快速开始
@@ -61,7 +61,7 @@ for item in api.get_pending_approvals():
 用户说"帮我发个邮件"
          │
          ▼
-    查知识库 _index.json
+    查站点索引 _index.json
     ┌────────┼────────┐
     ▼        ▼        ▼
  已知系统   已知系统   啥都不知道
@@ -103,7 +103,7 @@ oa-assistant/
 │       ├── code_generator.py    # Python 代码生成（不依赖 Jinja2）
 │       ├── diff_checker.py      # 增量对比，只合并新操作
 │       ├── interface_tester.py  # 三级闭环测试 + 诊断报告
-│       └── site_matcher.py      # 知识库路由匹配
+│       └── site_matcher.py      # 站点索引路由匹配
 ├── oa_sites/
 │   ├── _base.py                # 基类（重试/超时/Cookie/加密钩子）
 │   ├── _index.json             # 全系统索引

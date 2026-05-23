@@ -1,15 +1,11 @@
 ---
 name: "oa-assistant"
-description: "Learn internal enterprise OA systems from Chrome HAR exports and automate operations via generated Python interfaces. Invoke when the user asks to perform any work-related action: (1) Sending emails, (2) Submitting forms or approvals, (3) Querying records or reports, (4) Filing documents, (5) Any internal web system operation. Checks oa_sites knowledge base first; if unknown system or operation, guides user to export HAR for learning."
+description: "Learn internal enterprise OA systems from Chrome HAR exports and automate operations via generated Python interfaces. Invoke when the user asks to perform any work-related action: (1) Sending emails, (2) Submitting forms or approvals, (3) Querying records or reports, (4) Filing documents, (5) Any internal web system operation. Checks oa_sites index first; if unknown system or operation, guides user to export HAR for learning."
 ---
 
 # OA Assistant - 办公自动化助手
 
 自动学习企业内部 OA 系统并生成 Python 接口，一次学习永久可用。
-
-## 核心原则
-
-**宽进严出**：只要用户提到任何工作操作（发邮件、审批、查询、发文等），就触发本技能。技能内部通过知识库精确匹配判断是否能处理。
 
 ## 触发后第一步：路由匹配
 
@@ -31,7 +27,7 @@ description: "Learn internal enterprise OA systems from Chrome HAR exports and a
 
 ## 调用模式
 
-当知识库中已有匹配的系统和操作时：
+当已学系统目录中已有匹配的系统和操作时：
 
 1. 读取 `oa_sites/<site_id>/site_config.json` 获取配置
 2. 读取 `oa_sites/<site_id>/interface.py` 获取接口代码
@@ -61,7 +57,7 @@ result = api.<method_name>(<params>)
 
 ## 学习模式
 
-当知识库中没有匹配的系统或操作时：
+当已学系统目录中没有匹配的系统或操作时：
 
 ### Step 1: 引导用户导出 HAR
 
@@ -271,7 +267,7 @@ api.login(username="zhangsan", password="xxx")
 每个站点的凭证存储在 `oa_sites/<site_id>/credentials.json`，与接口代码同目录，`login()` 无参数时自动读取：
 
 ```bash
-# 写入凭证文件（site_id 对应知识库中的站点标识）
+# 写入凭证文件（site_id 对应 oa_sites 目录下的站点标识）
 echo '{"username": "zhangsan", "password": "xxx"}' > oa_sites/mail_oa/credentials.json
 ```
 
@@ -430,7 +426,7 @@ oa-assistant/
 │       └── interface_tester.py ← 三级闭环测试
 ├── assets/                     ← 模板资源
 │   └── interface.py.j2         ← Jinja2 备用模板
-└── oa_sites/                   ← 知识库（运行时生成）
+└── oa_sites/                   ← 已学系统目录（运行时生成）
     ├── _index.json             ← 总索引
     ├── _base.py                ← 接口基类
     └── <site_id>/              ← 各站点目录
