@@ -1,0 +1,24 @@
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+.env
+
+# 凭证文件（绝不上传）
+oa_sites/*/credentials.json
+
+# 诊断报告和中间状态文件
+diagnosis_report.json
+oa_state_*.json
+agent_analysis_*.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

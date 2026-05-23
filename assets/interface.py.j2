@@ -1,0 +1,54 @@
+# -*- coding: utf-8 -*-
+"""
+Jinja2 接口模板（备用）
+
+当 Jinja2 可用时，code_generator.py 可使用此模板生成代码。
+默认情况下 code_generator.py 使用内置模板引擎，不依赖 Jinja2。
+
+此模板保留供高级用户自定义生成格式。
+"""
+{# 接口类模板 #}
+# -*- coding: utf-8 -*-
+"""
+{{ site_name }} - 自动生成接口
+
+生成时间: {{ generated_at }}
+基础URL: {{ base_url }}
+"""
+import requests
+from typing import Optional, Dict, List, Any
+
+
+class {{ class_name }}(object):
+    """{{ site_name }}"""
+
+    def __init__(self, base_url: str = "{{ base_url }}"):
+        self.base_url = base_url.rstrip("/")
+        self.session = requests.Session()
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/109.0.0.0 Safari/537.36",
+            "X-Requested-With": "XMLHttpRequest",
+        })
+
+    def _request(self, method: str, path: str, **kwargs) -> dict:
+        """统一请求方法"""
+        url = "{}{}".format(self.base_url, path)
+        resp = self.session.request(method, url, **kwargs)
+        resp.raise_for_status()
+        try:
+            return resp.json()
+        except ValueError:
+            return {"status_code": resp.status_code, "text": resp.text}
+
+{% for op in operations %}
+    def {{ op.func_name }}({{ op.func_params }}) -> dict:
+        """{{ op.description }}"""
+{% if op.request_args %}
+        resp = self._request("{{ op.method }}", "{{ op.path_template }}",
+            {{ op.request_args }})
+{% else %}
+        resp = self._request("{{ op.method }}", "{{ op.path_template }}")
+{% endif %}
+        return resp
+
+{% endfor %}
