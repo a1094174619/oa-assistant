@@ -112,8 +112,14 @@ def _build_func_params(op):
 
     variable_params = op.get('variable_params', [])
     sensitive_params = op.get('sensitive_params', [])
+    is_file_upload = op.get('is_file_upload', False)
+    is_file_download = op.get('is_file_download', False)
 
     for p in variable_params:
+        # 文件上传参数：参数名为文件路径
+        if p.get('is_file') or p.get('source') == 'file':
+            parts.append('{}: str'.format(p['name']))
+            continue
         type_str = p['python_type']
         default = p.get('default')
         if default is not None:
@@ -124,6 +130,10 @@ def _build_func_params(op):
     for p in sensitive_params:
         type_str = p['python_type']
         parts.append('{}: {} = None'.format(p['name'], type_str))
+
+    # 文件下载方法：添加 save_path 参数
+    if is_file_download:
+        parts.append('save_path: str = None')
 
     return ', '.join(parts)
 
@@ -241,6 +251,9 @@ def _build_method(op, base_url):
     path_template = _build_path_template(op['path'], [p for p in op.get('params', []) if p['source'] == 'path'])
     request_args = _build_request_args(op)
 
+    is_file_upload = op.get('is_file_upload', False)
+    is_file_download = op.get('is_file_download', False)
+
     # 检查路径中是否有参数占位符 {xxx}
     path_params_in_template = re.findall(r'\{(\w+)\}', path_template)
 
@@ -259,7 +272,70 @@ def _build_method(op, base_url):
     else:
         path_code = "'{}'".format(path_template)
 
-    # 构建 _request 调用
+    # 文件下载：使用 _download()
+    if is_file_download:
+        download_kwargs = []
+        download_kwargs.append('save_path=save_path')
+        # 添加 query 参数
+        query_var_params = [p for p in op.get('variable_params', []) if p['source'] == 'query']
+        query_fixed_params = [p for p in op.get('fixed_params', []) if p['source'] == 'query']
+        if query_var_params or query_fixed_params:
+            params_dict_parts = []
+            for p in query_var_params:
+                params_dict_parts.append("'{}': {}".format(p['name'], p['name']))
+            for p in query_fixed_params:
+                params_dict_parts.append("'{}': {}".format(p['name'], repr(p['value'])))
+            download_kwargs.append('params={{{}}}'.format(', '.join(params_dict_parts)))
+
+        lines.append("        resp = self._download({}, {})".format(path_code, ', '.join(download_kwargs)))
+        lines.append('        return resp')
+        return '\n'.join(lines)
+
+    # 文件上传：使用 _upload()
+    if is_file_upload:
+        file_params = [p for p in op.get('variable_params', []) if p.get('is_file') or p.get('source') == 'file']
+        non_file_var_params = [p for p in op.get('variable_params', []) if not (p.get('is_file') or p.get('source') == 'file')]
+        non_file_fixed_params = [p for p in op.get('fixed_params', []) if p['source'] in ('body_json', 'body_form', 'body_params')]
+
+        # 构建 file_paths 参数
+        if len(file_params) == 1:
+            lines.append("        resp = self._upload({}, ".format(path_code))
+            lines.append("            file_paths={},".format(file_params[0]['name']))
+        else:
+            # 多文件字段：构建字典
+            dict_parts = ["'{}': {}".format(p['name'], p['name']) for p in file_params]
+            lines.append("        resp = self._upload({}, ".format(path_code))
+            lines.append("            file_paths={{{}}},".format(', '.join(dict_parts)))
+
+        # field_name（单文件时）
+        if len(file_params) == 1:
+            lines.append("            field_name='{}',".format(file_params[0]['name']))
+
+        # 额外表单字段
+        extra_fields_parts = []
+        for p in non_file_var_params:
+            extra_fields_parts.append("'{}': {}".format(p['name'], p['name']))
+        for p in non_file_fixed_params:
+            extra_fields_parts.append("'{}': {}".format(p['name'], repr(p['value'])))
+        if extra_fields_parts:
+            lines.append("            extra_fields={{{}}},".format(', '.join(extra_fields_parts)))
+
+        # query 参数
+        query_var_params = [p for p in non_file_var_params if p['source'] == 'query']
+        query_fixed_params = [p for p in op.get('fixed_params', []) if p['source'] == 'query']
+        if query_var_params or query_fixed_params:
+            params_dict_parts = []
+            for p in query_var_params:
+                params_dict_parts.append("'{}': {}".format(p['name'], p['name']))
+            for p in query_fixed_params:
+                params_dict_parts.append("'{}': {}".format(p['name'], repr(p['value'])))
+            lines.append("            params={{{}}}".format(', '.join(params_dict_parts)))
+
+        lines.append("            )")
+        lines.append('        return resp')
+        return '\n'.join(lines)
+
+    # 普通请求：使用 _request()
     if request_args:
         lines.append("        resp = self._request('{}', {},".format(method, path_code))
         lines.append('            {})'.format(request_args))
@@ -498,6 +574,8 @@ def generate_site_config(params_data, site_id, site_name, base_url, aliases=None
             'method': op['method'],
             'path': op['path'],
             'params': variable_params,
+            'is_file_upload': op.get('is_file_upload', False),
+            'is_file_download': op.get('is_file_download', False),
         })
 
     return {

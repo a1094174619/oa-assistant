@@ -228,6 +228,21 @@ def extract_params(labeled_data):
 
         # 3. POST Body 参数
         if post_data:
+            # 文件上传参数
+            file_parts = post_data.get('files')
+            if file_parts:
+                for fp in file_parts:
+                    all_params.append({
+                        'name': fp.get('name', 'file'),
+                        'source': 'file',
+                        'value': fp.get('filename', ''),
+                        'classification': 'variable',
+                        'python_type': 'str',
+                        'required': True,
+                        'is_file': True,
+                        'file_content_type': fp.get('content_type', ''),
+                    })
+
             # JSON body
             json_body = post_data.get('json')
             if isinstance(json_body, dict):
@@ -313,6 +328,8 @@ def extract_params(labeled_data):
             'derived_params': derived_params,
             'sensitive_params': sensitive_params,
             'func_signature': func_signature,
+            'is_file_upload': post_data.get('is_file_upload', False) if post_data else False,
+            'is_file_download': primary.get('response', {}).get('is_file_download', False),
         })
 
         result_ops.append(result_op)

@@ -11,6 +11,7 @@ import json
 import os
 import requests
 from typing import Optional, Dict, Any
+from urllib.parse import unquote
 
 
 class BaseOAInterface(object):
@@ -59,6 +60,32 @@ class BaseOAInterface(object):
         s2 = re.sub(r'([a-z\d])([A-Z])', r'\1_\2', s1).lower()
         return s2
 
+    # 二进制响应 MIME 类型前缀（不应尝试 JSON 解析）
+    BINARY_MIME_PREFIXES = (
+        'application/octet-stream',
+        'application/zip',
+        'application/x-rar',
+        'application/pdf',
+        'application/vnd.',
+        'application/msword',
+        'application/vnd.openxmlformats',
+        'image/',
+        'audio/',
+        'video/',
+    )
+
+    def _is_binary_response(self, resp):
+        """判断响应是否为二进制文件"""
+        mime = resp.headers.get('Content-Type', '').split(';')[0].strip().lower()
+        for prefix in self.BINARY_MIME_PREFIXES:
+            if mime.startswith(prefix):
+                return True
+        # Content-Disposition 附件标记
+        cd = resp.headers.get('Content-Disposition', '')
+        if 'attachment' in cd.lower():
+            return True
+        return False
+
     def _request(self, method, path, **kwargs):
         # type: (str, str, **Any) -> dict
         """
@@ -70,7 +97,7 @@ class BaseOAInterface(object):
             **kwargs: 传递给 requests.request 的额外参数
 
         Returns:
-            dict: 响应 JSON
+            dict: 响应 JSON 或文本
 
         Raises:
             requests.HTTPError: HTTP 错误
@@ -89,6 +116,16 @@ class BaseOAInterface(object):
             try:
                 resp = self.session.request(method, url, **kwargs)
                 resp.raise_for_status()
+
+                # 二进制响应：返回原始 bytes，不尝试 JSON 解析
+                if self._is_binary_response(resp):
+                    return {
+                        'status_code': resp.status_code,
+                        'content': resp.content,
+                        'mime_type': resp.headers.get('Content-Type', ''),
+                        'content_disposition': resp.headers.get('Content-Disposition', ''),
+                        'size': len(resp.content),
+                    }
 
                 try:
                     data = resp.json()
@@ -127,6 +164,148 @@ class BaseOAInterface(object):
             raise last_error
 
         return {}
+
+    def _download(self, path, save_path=None, **kwargs):
+        # type: (str, Optional[str], **Any) -> dict
+        """
+        下载文件。
+
+        Args:
+            path: 请求路径（相对于 base_url）
+            save_path: 保存路径。为 None 时不保存，仅返回内容。
+                       为目录时自动从响应头推断文件名。
+                       为文件路径时直接保存到该路径。
+            **kwargs: 传递给 requests.request 的额外参数（如 params）
+
+        Returns:
+            dict: {
+                'status_code': int,
+                'content': bytes,          # 文件原始内容
+                'mime_type': str,          # MIME 类型
+                'filename': str,           # 推断的文件名
+                'size': int,               # 文件大小
+                'saved_path': str or None, # 保存路径（仅当 save_path 不为 None）
+            }
+        """
+        url = '{}{}'.format(self.base_url, path)
+
+        if 'timeout' not in kwargs:
+            kwargs['timeout'] = self.timeout
+
+        resp = self.session.request('GET', url, **kwargs)
+        resp.raise_for_status()
+
+        # 推断文件名
+        filename = self._extract_filename(resp)
+
+        result = {
+            'status_code': resp.status_code,
+            'content': resp.content,
+            'mime_type': resp.headers.get('Content-Type', ''),
+            'filename': filename,
+            'size': len(resp.content),
+            'saved_path': None,
+        }
+
+        if save_path is not None:
+            if os.path.isdir(save_path):
+                save_path = os.path.join(save_path, filename)
+            save_dir = os.path.dirname(save_path)
+            if save_dir and not os.path.exists(save_dir):
+                os.makedirs(save_dir)
+            with open(save_path, 'wb') as f:
+                f.write(resp.content)
+            result['saved_path'] = os.path.abspath(save_path)
+
+        return result
+
+    @staticmethod
+    def _extract_filename(resp):
+        """从响应头推断下载文件名"""
+        import re
+        from urllib.parse import urlparse as _urlparse
+        cd = resp.headers.get('Content-Disposition', '')
+        if cd:
+            # RFC 5987: filename*=UTF-8''xxx
+            m = re.search(r"filename\*=(?:UTF-8|utf-8)''(.+?)(?:;|$)", cd)
+            if m:
+                return unquote(m.group(1).strip())
+            # filename="xxx" 或 filename=xxx
+            m = re.search(r'filename="?([^";]+)"?', cd)
+            if m:
+                return m.group(1).strip()
+
+        # 从 URL 路径推断
+        parsed = _urlparse(resp.url)
+        name = os.path.basename(unquote(parsed.path))
+        if name and '.' in name:
+            return name
+
+        # 兜底
+        return 'download'
+
+    def _upload(self, path, file_paths, field_name='file', extra_fields=None, **kwargs):
+        # type: (str, object, str, Optional[Dict[str, Any]], **Any) -> dict
+        """
+        上传文件。
+
+        Args:
+            path: 请求路径（相对于 base_url）
+            file_paths: 文件路径（str）或文件路径列表。
+                        也可以是 {field_name: file_path} 的字典。
+            field_name: 文件字段名（当 file_paths 为 str 或 list 时使用）
+            extra_fields: 额外的表单字段 {name: value}
+            **kwargs: 传递给 requests.request 的额外参数
+
+        Returns:
+            dict: 响应 JSON
+        """
+        url = '{}{}'.format(self.base_url, path)
+
+        if 'timeout' not in kwargs:
+            kwargs['timeout'] = self.timeout
+
+        # 构建 files 参数
+        files = {}
+        opened = []  # 跟踪打开的文件对象，请求后关闭
+
+        try:
+            if isinstance(file_paths, dict):
+                # {field_name: file_path} 格式
+                for fname, fpath in file_paths.items():
+                    f = open(fpath, 'rb')
+                    opened.append(f)
+                    files[fname] = (os.path.basename(fpath), f)
+            elif isinstance(file_paths, (list, tuple)):
+                # 多文件上传到同一字段
+                file_list = []
+                for fpath in file_paths:
+                    f = open(fpath, 'rb')
+                    opened.append(f)
+                    file_list.append((os.path.basename(fpath), f))
+                files[field_name] = file_list
+            else:
+                # 单文件
+                f = open(file_paths, 'rb')
+                opened.append(f)
+                files[field_name] = (os.path.basename(file_paths), f)
+
+            # 额外表单字段
+            data = extra_fields or {}
+
+            resp = self.session.post(url, files=files, data=data, **kwargs)
+            resp.raise_for_status()
+
+            try:
+                return resp.json()
+            except (json.JSONDecodeError, ValueError):
+                return {
+                    'status_code': resp.status_code,
+                    'text': resp.text,
+                }
+        finally:
+            for f in opened:
+                f.close()
 
     def _load_credentials(self, config_path=None):
         # type: (Optional[str]) -> Dict[str, str]

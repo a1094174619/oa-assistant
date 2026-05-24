@@ -116,6 +116,31 @@ def _extract_post_data(request):
     if params_list:
         result['params'] = {p['name']: p.get('value', '') for p in params_list if 'name' in p}
 
+    # 解析 multipart/form-data 中的文件 part
+    if 'multipart' in mime and params_list:
+        file_parts = []
+        form_parts = {}
+        for p in params_list:
+            if 'fileName' in p or p.get('contentType') in (
+                'application/octet-stream', 'application/pdf',
+                'application/vnd.', 'image/', 'text/',
+            ) or (p.get('value', '') == '' and 'fileName' not in p
+                  and p.get('contentType', '') != ''):
+                # 文件 part：有 fileName 或有 contentType 但无 value
+                file_parts.append({
+                    'name': p.get('name', 'file'),
+                    'filename': p.get('fileName', ''),
+                    'content_type': p.get('contentType', ''),
+                })
+            else:
+                form_parts[p['name']] = p.get('value', '')
+
+        if file_parts:
+            result['files'] = file_parts
+            result['is_file_upload'] = True
+        if form_parts:
+            result['form'] = form_parts
+
     return result
 
 
@@ -132,6 +157,26 @@ def _extract_response_info(entry):
         'size': content.get('size', 0),
         'headers': headers,
     }
+
+    # 识别文件下载响应
+    cd = headers.get('Content-Disposition', headers.get('content-disposition', ''))
+    if 'attachment' in cd.lower():
+        result['is_file_download'] = True
+        # 提取下载文件名
+        import re
+        m = re.search(r'filename\*=(?:UTF-8|utf-8)\'\'(.+?)(?:;|$)', cd)
+        if m:
+            result['download_filename'] = unquote(m.group(1).strip())
+        else:
+            m = re.search(r'filename="?([^";]+)"?', cd)
+            if m:
+                result['download_filename'] = m.group(1).strip()
+    elif content.get('mimeType', '').startswith((
+        'application/octet-stream', 'application/zip',
+        'application/x-rar', 'application/pdf',
+        'application/vnd.', 'application/msword',
+    )):
+        result['is_file_download'] = True
 
     # 提取响应体（可能很大，限制大小）
     text = content.get('text', '')

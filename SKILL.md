@@ -1,6 +1,6 @@
 ---
 name: "oa-assistant"
-description: "Learn internal enterprise OA systems from Chrome HAR exports and automate operations via generated Python interfaces. Invoke when the user asks to perform any work-related action: (1) Sending emails, (2) Submitting forms or approvals, (3) Querying records or reports, (4) Filing documents, (5) Any internal web system operation. Checks oa_sites index first; if unknown system or operation, guides user to export HAR for learning."
+description: "Learn internal enterprise OA systems from Chrome HAR exports and automate operations via generated Python interfaces. Invoke when the user asks to perform any work-related action: (1) Sending emails, (2) Submitting forms or approvals, (3) Querying records or reports, (4) Filing documents, (5) Any internal web system operation. Checks oa_sites knowledge base first; if unknown system or operation, guides user to export HAR for learning."
 ---
 
 # OA Assistant - 办公自动化助手
@@ -27,7 +27,7 @@ description: "Learn internal enterprise OA systems from Chrome HAR exports and a
 
 ## 调用模式
 
-当已学系统目录中已有匹配的系统和操作时：
+当 oa_sites 目录中已有匹配的站点和操作时：
 
 1. 读取 `oa_sites/<site_id>/site_config.json` 获取配置
 2. 读取 `oa_sites/<site_id>/interface.py` 获取接口代码
@@ -57,7 +57,7 @@ result = api.<method_name>(<params>)
 
 ## 学习模式
 
-当已学系统目录中没有匹配的系统或操作时：
+当 oa_sites 目录中没有匹配的站点或操作时：
 
 ### Step 1: 引导用户导出 HAR
 
@@ -402,35 +402,83 @@ python <base_dir>/scripts/core/site_matcher.py "审批报销"
 
 ---
 
+## 文件上传与下载
+
+生成的接口支持文件上传和下载操作。HAR 解析时会自动识别 `multipart/form-data` 中的文件 part 和二进制下载响应，生成的代码会使用基类的 `_upload()` / `_download()` 方法。
+
+### 文件上传
+
+当 HAR 中包含 `multipart/form-data` 请求时，自动识别文件字段并生成上传方法：
+
+```python
+# 单文件上传
+result = api.upload_attachment(file='/path/to/file.pdf')
+
+# 带额外表单字段的上传
+result = api.upload_report(file='/path/to/report.xlsx',
+                           report_name='月度报告',
+                           report_type='monthly')
+```
+
+底层调用基类的 `_upload()` 方法：
+
+```python
+# 手动调用（自定义场景）
+result = api._upload('/api/file/upload',
+                     file_paths='/path/to/file.pdf',
+                     field_name='file',
+                     extra_fields={'category': 'report'})
+
+# 多文件上传（同一字段）
+result = api._upload('/api/file/batch',
+                     file_paths=['/path/a.pdf', '/path/b.docx'],
+                     field_name='files')
+
+# 多字段文件上传
+result = api._upload('/api/file/multi',
+                     file_paths={'attachment': '/path/a.pdf',
+                                 'signature': '/path/sign.png'})
+```
+
+### 文件下载
+
+当 HAR 中响应为二进制文件（`Content-Disposition: attachment` 或二进制 MIME 类型）时，自动生成下载方法：
+
+```python
+# 下载到指定路径
+result = api.download_report(report_id='123', save_path='/path/to/save/')
+
+# 不保存，仅获取内容
+result = api.download_report(report_id='123')
+content = result['content']   # bytes
+filename = result['filename'] # 推断的文件名
+```
+
+底层调用基类的 `_download()` 方法：
+
+```python
+# 手动调用（自定义场景）
+result = api._download('/api/file/123', save_path='./downloads/')
+# 返回: {'content': bytes, 'filename': 'report.pdf', 'size': 12345, 'saved_path': '...'}
+```
+
+### `_request()` 的二进制响应处理
+
+普通 `_request()` 调用遇到二进制响应时（如意外返回文件），不会尝试 JSON 解析，而是返回：
+
+```python
+{
+    'status_code': 200,
+    'content': b'...',           # 原始 bytes
+    'mime_type': 'application/pdf',
+    'content_disposition': 'attachment; filename="report.pdf"',
+    'size': 12345,
+}
+```
+
+---
+
 ## 注意事项
 - 不依赖 Jinja2（内置模板引擎）
 - HAR 文件可能很大，分析时注意内存
-- 部分系统使用 iframe，HAR 中可能无法完整捕获，需注意
-
-## 目录结构
-
-```
-oa-assistant/
-├── SKILL.md                    ← 技能说明（本文件）
-├── scripts/                    ← 可执行脚本
-│   ├── analyze.py              ← 流水线入口
-│   └── core/                   ← 核心处理模块
-│       ├── har_parser.py       ← HAR 解析 + 加密检测
-│       ├── boundary_detector.py← 操作边界检测
-│       ├── semantic_labeler.py ← 语义标注
-│       ├── review_presenter.py ← 确认清单生成
-│       ├── param_extractor.py  ← 参数提取
-│       ├── code_generator.py   ← 代码生成
-│       ├── diff_checker.py     ← 增量对比
-│       ├── site_matcher.py     ← 站点匹配 + 管理
-│       └── interface_tester.py ← 三级闭环测试
-├── assets/                     ← 模板资源
-│   └── interface.py.j2         ← Jinja2 备用模板
-└── oa_sites/                   ← 已学系统目录（运行时生成）
-    ├── _index.json             ← 总索引
-    ├── _base.py                ← 接口基类
-    └── <site_id>/              ← 各站点目录
-        ├── interface.py
-        ├── site_config.json
-        └── credentials.json
-```
+- 部分系统使用 iframe，HAR 中可能无法完整捕获，需注意处理
